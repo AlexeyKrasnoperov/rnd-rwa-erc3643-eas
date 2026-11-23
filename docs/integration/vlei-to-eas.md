@@ -27,7 +27,7 @@ with an `AttesterResolver` (`0xbCD6D24861d467703fbF3221f526c28A1adF9D4F`) that a
 single bridge wallet (`0x8EF2312aB6A316a0CA9Ad90661B6bccE8A7eCdc6`); see
 `deployments/sepolia.json` in `OnChainTrust/vlei-eas-contracts`.
 
-**The Sepolia deployment is a sandbox.** Its attestations describe seven fictional
+**The Sepolia deployment is a sandbox.** Its attestations describe a set of fictional
 companies and their representatives, whose credentials chain to a demo root of trust
 created for the sandbox, not to the GLEIF root, and whose LEIs are not in the GLEIF
 registry (a real LEI is refused). Registration is open to anyone. Use this UID and attester
