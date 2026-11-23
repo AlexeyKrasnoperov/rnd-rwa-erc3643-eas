@@ -2,7 +2,7 @@
 
 ## What is vlei-to-eas?
 
-`vlei-to-eas` (repo: `AlexeyKrasnoperov/vlei-to-eas`) is a Next.js bridge application
+`vlei-to-eas` (contracts: `OnChainTrust/vlei-eas-contracts`) is a Next.js bridge application
 that translates GLEIF vLEI credentials into EAS attestations on-chain.
 
 **Input:** vLEI credentials: GLEIF organizational identity credentials based on the
@@ -21,19 +21,29 @@ on an authorization the entity gives the QVI, and the bridge cannot detect that
 authorization being revoked. No attestation carries `credType` `"OOR"`.
 
 **Output:** EAS attestations under the bridge's own schema (separate from both Shibui
-schemas: `InvestorEligibility`, Schema-1, and `IssuerAuthorization`, Schema-2). It is
-registered on Sepolia as UID `0x0b5f333cdb7e06e0d9f7c5fbd7a151bb0d8afbcde17017390ef73b673f841aa7`
-with an `AttesterResolver` (`0xbCD6D24861d467703fbF3221f526c28A1adF9D4F`) that admits a
-single bridge wallet (`0x8EF2312aB6A316a0CA9Ad90661B6bccE8A7eCdc6`); see
-`deployments/sepolia.json` in `OnChainTrust/vlei-eas-contracts`.
+schemas: `InvestorEligibility`, Schema-1, and `IssuerAuthorization`, Schema-2). Each
+deployment of the bridge has its own attester wallet, and registers the schema with an
+`AttesterResolver` that admits only that wallet. The schema UID depends on the resolver, so
+each deployment has its own UID, and an integration is configured against one deployment:
+its schema UID and its attester. Nothing configured against one deployment carries over to
+another by accident.
 
-**The Sepolia deployment is a sandbox.** Its attestations describe a set of fictional
-companies and their representatives, whose credentials chain to a demo root of trust
-created for the sandbox, not to the GLEIF root, and whose LEIs are not in the GLEIF
-registry (a real LEI is refused). Registration is open to anyone. Use this UID and attester
-to build and test an integration; they say nothing about a real organization. A bridge for
-real vLEI credentials will run under a different attester and therefore a different schema
-UID, so nothing configured against the sandbox carries over to it by accident.
+### Deployments
+
+| Deployment | Chain | Schema UID | AttesterResolver | Attester |
+|------------|-------|------------|------------------|----------|
+| Sandbox | Sepolia | `0x0b5f333cdb7e06e0d9f7c5fbd7a151bb0d8afbcde17017390ef73b673f841aa7` | `0xbCD6D24861d467703fbF3221f526c28A1adF9D4F` | `0x8EF2312aB6A316a0CA9Ad90661B6bccE8A7eCdc6` |
+
+The sandbox values are also in `deployments/sepolia.json` in
+`OnChainTrust/vlei-eas-contracts`.
+
+**The sandbox does not attest real organizations.** Its attestations describe a set of
+fictional companies and their representatives, whose credentials chain to a demo root of
+trust created for the sandbox, not to the GLEIF root, and whose LEIs are not in the GLEIF
+registry (a real LEI is refused). Registration is open to anyone at
+`https://bridge-sandbox.onchaintrust.org`. Use it to build and test an integration. The
+rest of this guide describes the bridge as it handles real vLEI credentials and notes
+where the sandbox differs.
 
 **Background monitors** re-check vLEI validity every 4 h and the GLEIF LEI record every 12 h.
 Liveness is expressed through native EAS fields, not by re-attesting: every attestation is
@@ -72,7 +82,8 @@ At each step:
 3. **LE/ECR → EAS attestation:** `vlei-to-eas` verifies the KERI key-event log via
    a `vlei-verifier` sidecar and confirms the LEI record in the GLEIF API, then writes an
    EAS attestation. An attestation exists only after both checks pass; `vleiSaid` always
-   carries the credential's SAID.
+   carries the credential's SAID. The sandbox, whose companies are not in the GLEIF
+   registry, reads the record from its own list instead.
 4. **EAS attestation → Shibui:** `VLEIPolicy.validate()` checks `credType` and the optional staleness bound,
    then returns `true`, allowing the ERC-3643 token transfer to proceed.
 
@@ -116,17 +127,18 @@ attestation. Use one of:
 ABI-encoded fields (in order):
 
 ```
-string  lei             — GLEIF 20-character LEI code
-string  legalName       — Legal entity name from GLEIF registry
-string  credType        — "LE" | "ECR" | "OOR" ("OOR" is not issued by the current version)
-string  keriAid         — KERI AID of the credential holder
-bytes32 vleiSaid        — SAID of the vLEI credential (32-byte digest of the CESR SAID)
-uint64  verifiedAt      — Unix timestamp of the verification at issuance (not refreshed)
+string  lei             - GLEIF 20-character LEI code
+string  legalName       - Legal entity name from GLEIF registry
+string  credType        - "LE" | "ECR" | "OOR" ("OOR" is not issued by the current version)
+string  keriAid         - KERI AID of the credential holder
+bytes32 vleiSaid        - SAID of the vLEI credential (32-byte digest of the CESR SAID)
+uint64  verifiedAt      - Unix timestamp of the verification at issuance (not refreshed)
 ```
 
-The schema is already registered on Sepolia by the bridge (UID above). Do not register a
-second copy: `EASClaimVerifier.setTopicSchemaMapping` must map topics 15 and 16 to the
-live UID, which goes into `deployments/sepolia.json` under `shibui.vlei.bridgeSchemaUID`.
+The schema is already registered by the bridge (see "Deployments"). Do not register a
+second copy: `EASClaimVerifier.setTopicSchemaMapping` must map topics 15 and 16 to the UID
+of the deployment you integrate with, which goes into `deployments/sepolia.json` under
+`shibui.vlei.bridgeSchemaUID`.
 `VLEIPolicy` itself never sees a schema UID; only the verifier is bound to the schema.
 
 ---
@@ -134,14 +146,14 @@ live UID, which goes into `deployments/sepolia.json` under `shibui.vlei.bridgeSc
 ## Adding the Bridge Wallet as a Trusted Attester
 
 The bridge wallet is enforced as the sole authorized attester by `AttesterResolver.sol`
-in the vlei-to-eas repo. On the Shibui side, the bridge wallet must also be trusted
+(`OnChainTrust/vlei-eas-contracts`). On the Shibui side, the bridge wallet must also be trusted
 via the `IssuerAuthorization` schema (Schema-2 in the existing Shibui deployment).
 
 ```bash
 # 1. An authorizer attests an IssuerAuthorization (Schema-2) record naming the
 #    bridge wallet as attester for topics 15 and 16 (same flow as for any other
 #    attester; see docs/schemas/schema-definitions.md). Keep its UID as AUTH_UID.
-BRIDGE_WALLET=0x8EF2312aB6A316a0CA9Ad90661B6bccE8A7eCdc6   # vlei-to-eas attester
+BRIDGE_WALLET=0x8EF2312aB6A316a0CA9Ad90661B6bccE8A7eCdc6   # attester of the sandbox deployment
 
 # 2. Register the bridge wallet as a trusted attester for both topics in one call.
 cast send $EAS_TRUSTED_ISSUERS_ADAPTER \
@@ -171,7 +183,7 @@ issue to a chosen recipient, use this integration only with unlinked wallets.
 ## Deployment Snippet
 
 ```bash
-# 1. Use the schema the bridge already registered on Sepolia.
+# 1. Use the schema UID of the deployment you integrate with (here: the sandbox).
 SCHEMA_UID=0x0b5f333cdb7e06e0d9f7c5fbd7a151bb0d8afbcde17017390ef73b673f841aa7
 
 # 2. Deploy VLEILegalEntityPolicy (Topic 15, "LE"). The third argument is the optional
@@ -238,6 +250,7 @@ in `REQUIRED_TOPICS`. The trusted-attester step above is separate in either case
 - **OOR, and ECR issued by a QVI:** the current version of the bridge does not issue
   attestations for them (see the credential table). Accepting both `"ECR"` and `"OOR"` on
   Topic 16 would also need a policy that does not exist.
-- **Real organizations:** the Sepolia deployment is a sandbox with fictional companies.
+- **Real organizations:** the only deployment listed in this guide is a sandbox with
+  fictional companies.
 - **KERI/GLEIF logic:** All vLEI validation is in `vlei-to-eas`. Shibui reads only the
   resulting EAS attestation.
