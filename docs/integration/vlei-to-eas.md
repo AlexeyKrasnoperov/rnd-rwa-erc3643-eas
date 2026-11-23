@@ -62,7 +62,7 @@ GLEIF Root of Trust (GLEIF vLEI Root AID)
   └── Qualified vLEI Issuer (QVI) — GLEIF-authorized credential issuer
         └── Legal Entity vLEI (LE credential, SAID verified by vlei-to-eas)
               └── ECR vLEI (role credential, issued by the legal entity)
-                    └── EAS attestation (minted by bridge wallet, bridge schema)
+                    └── EAS attestation (minted by bridge wallet, vLEI bridge schema)
                           └── VLEIPolicy.validate() → Shibui ERC-3643 enforcement
 ```
 
@@ -111,7 +111,7 @@ attestation. Use one of:
 
 ---
 
-## vLEI Schema (bridge schema)
+## vLEI Bridge Schema
 
 ABI-encoded fields (in order):
 
@@ -189,7 +189,7 @@ forge create contracts/policies/VLEIPolicy.sol:VLEIPolicy \
   --rpc-url $SEPOLIA_RPC --private-key $DEPLOYER_KEY --broadcast
 VLEI_AUTHORIZED_ROLE_POLICY=<"Deployed to" address printed above>
 
-# 4. Map both topics to the bridge schema. Without this, registerAttestation reverts
+# 4. Map both topics to the vLEI bridge schema. Without this, registerAttestation reverts
 #    with SchemaNotMappedForTopic. These setters need OPERATOR_ROLE on the verifier.
 cast send $EAS_CLAIM_VERIFIER \
   "setTopicSchemaMapping(uint256,bytes32)" 15 $SCHEMA_UID \
