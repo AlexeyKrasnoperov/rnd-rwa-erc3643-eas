@@ -14,12 +14,26 @@ KERI (Key Event Receipt Infrastructure) protocol. Three credential types are rel
 | `ECR` | Engagement Context Role | A person is authorized to act in a specific context |
 | `OOR` | Official Organizational Role | A person holds an official role (officer, director) |
 
+The current version of the bridge issues attestations for `LE` credentials and for `ECR`
+credentials issued by the legal entity itself. `OOR` credentials, and `ECR` credentials
+issued by a QVI on the entity's behalf, are not supported in the current version: they rest
+on an authorization the entity gives the QVI, and the bridge cannot detect that
+authorization being revoked. No attestation carries `credType` `"OOR"`.
+
 **Output:** EAS attestations under the bridge's own schema (separate from both Shibui
 schemas: `InvestorEligibility`, Schema-1, and `IssuerAuthorization`, Schema-2). It is
 registered on Sepolia as UID `0x0b5f333cdb7e06e0d9f7c5fbd7a151bb0d8afbcde17017390ef73b673f841aa7`
 with an `AttesterResolver` (`0xbCD6D24861d467703fbF3221f526c28A1adF9D4F`) that admits a
 single bridge wallet (`0x8EF2312aB6A316a0CA9Ad90661B6bccE8A7eCdc6`); see
-`contracts/deployments/sepolia.json` in the bridge repo.
+`deployments/sepolia.json` in `OnChainTrust/vlei-eas-contracts`.
+
+**The Sepolia deployment is a sandbox.** Its attestations describe seven fictional
+companies and their representatives, whose credentials chain to a demo root of trust
+created for the sandbox, not to the GLEIF root, and whose LEIs are not in the GLEIF
+registry (a real LEI is refused). Registration is open to anyone. Use this UID and attester
+to build and test an integration; they say nothing about a real organization. A bridge for
+real vLEI credentials will run under a different attester and therefore a different schema
+UID, so nothing configured against the sandbox carries over to it by accident.
 
 **Background monitors** re-check vLEI validity every 4 h and the GLEIF LEI record every 12 h.
 Liveness is expressed through native EAS fields, not by re-attesting: every attestation is
@@ -47,7 +61,7 @@ and register a new attestation.
 GLEIF Root of Trust (GLEIF vLEI Root AID)
   └── Qualified vLEI Issuer (QVI) — GLEIF-authorized credential issuer
         └── Legal Entity vLEI (LE credential, SAID verified by vlei-to-eas)
-              └── ECR / OOR vLEI (role credential, chained to LE)
+              └── ECR vLEI (role credential, issued by the legal entity)
                     └── EAS attestation (minted by bridge wallet, bridge schema)
                           └── VLEIPolicy.validate() → Shibui ERC-3643 enforcement
 ```
@@ -55,7 +69,7 @@ GLEIF Root of Trust (GLEIF vLEI Root AID)
 At each step:
 1. **GLEIF root → QVI:** GLEIF manages the root AID; QVIs are accredited out-of-band.
 2. **QVI → LE credential:** The LE credential's SAID is registered in the GLEIF API.
-3. **LE/ECR/OOR → EAS attestation:** `vlei-to-eas` verifies the KERI key-event log via
+3. **LE/ECR → EAS attestation:** `vlei-to-eas` verifies the KERI key-event log via
    a `vlei-verifier` sidecar and confirms the LEI record in the GLEIF API, then writes an
    EAS attestation. An attestation exists only after both checks pass; `vleiSaid` always
    carries the credential's SAID.
@@ -74,14 +88,14 @@ Two ERC-3643 claim topics are introduced for vLEI credentials:
 | Topic ID | Name | Accepted credType | Purpose |
 |----------|------|-------------------|---------|
 | 15 | `VLEI_LEGAL_ENTITY` | `"LE"` | Proves the wallet/entity holds a valid GLEIF LEI |
-| 16 | `VLEI_AUTHORIZED_ROLE` | `"ECR"` or `"OOR"` (one of them) | Proves a person has an authorized organizational role |
+| 16 | `VLEI_AUTHORIZED_ROLE` | `"ECR"` | Proves a person has an authorized organizational role |
 
 Each topic gets its own `VLEIPolicy` instance deployed with the matching `expectedCredType_`.
 
 `EASClaimVerifier` holds exactly one policy per topic, and a `VLEIPolicy` accepts exactly
-one `credType`. Topic 16 therefore accepts ECR or OOR, whichever its policy was deployed
-with, not both. Accepting both on one topic needs a policy that matches either value, which
-does not exist yet.
+one `credType`. Topic 16 is deployed with `"ECR"`, the only role credential the current
+version of the bridge issues. Accepting `"ECR"` and `"OOR"` on one topic would need a
+policy that matches either value, which does not exist.
 
 ### Making the topics required
 
@@ -104,7 +118,7 @@ ABI-encoded fields (in order):
 ```
 string  lei             — GLEIF 20-character LEI code
 string  legalName       — Legal entity name from GLEIF registry
-string  credType        — "LE" | "ECR" | "OOR"
+string  credType        — "LE" | "ECR" | "OOR" ("OOR" is not issued by the current version)
 string  keriAid         — KERI AID of the credential holder
 bytes32 vleiSaid        — SAID of the vLEI credential (32-byte digest of the CESR SAID)
 uint64  verifiedAt      — Unix timestamp of the verification at issuance (not refreshed)
@@ -221,7 +235,9 @@ in `REQUIRED_TOPICS`. The trusted-attester step above is separate in either case
   attestation, and again after every re-issue (a renewed LEI yields a new UID).
 - **Separate identities:** wallets linked to a separate identity are not supported (see
   "Wallet-as-identity only").
-- **ECR and OOR on one topic:** Topic 16 accepts one `credType`. The snippet configures
-  `"ECR"`; accepting `"OOR"` as well needs a policy that does not exist yet.
+- **OOR, and ECR issued by a QVI:** the current version of the bridge does not issue
+  attestations for them (see the credential table). Accepting both `"ECR"` and `"OOR"` on
+  Topic 16 would also need a policy that does not exist.
+- **Real organizations:** the Sepolia deployment is a sandbox with fictional companies.
 - **KERI/GLEIF logic:** All vLEI validation is in `vlei-to-eas`. Shibui reads only the
   resulting EAS attestation.
